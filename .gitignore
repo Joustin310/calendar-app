@@ -1,0 +1,7 @@
+credentials.json
+token.json
+.streamlit/
+reporte_tiempos.csv
+config_eventos.json
+resumen_pendiente.json
+__pycache__/

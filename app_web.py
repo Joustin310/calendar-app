@@ -1,0 +1,154 @@
+import streamlit as st
+import datetime
+import time
+import os
+import os.path
+import json
+import csv
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+
+# --- CONFIGURACIÓN BÁSICA ---
+st.set_page_config(page_title="Filmmaking Calendar", page_icon="🎬", layout="centered")
+
+SCOPES = ['https://www.googleapis.com/auth/calendar']
+TIMEZONE = "America/Costa_Rica"
+TZ_SUFFIX = "-06:00"
+
+SUELDO_POR_HORA = 15.00 
+MONEDA = "$"
+
+ARCHIVO_CONFIG = 'config_eventos.json'
+ARCHIVO_REPORTE = 'reporte_tiempos.csv'
+
+# ==========================================
+# LÓGICA DEL CALENDARIO (Simplificada para la web)
+# ==========================================
+def get_calendar_service():
+    creds = None
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            # En Streamlit, no podemos usar el run_local_server normal sin interrumpir
+            # Usaremos el flujo estándar, pero lo haremos con un archivo temporal
+            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+    return build('calendar', 'v3', credentials=creds)
+
+# ==========================================
+# ESTADO DE LA SESIÓN (Memoria de Streamlit)
+# ==========================================
+# Streamlit recarga la página cada vez que presionas un botón.
+# Usamos st.session_state para que el tiempo no se reinicie.
+
+if 'service' not in st.session_state:
+    st.session_state.service = get_calendar_service()
+if 'tareas_hoy' not in st.session_state:
+    st.session_state.tareas_hoy = []
+if 'tarea_actual' not in st.session_state:
+    st.session_state.tarea_actual = None
+if 'inicio_real' not in st.session_state:
+    st.session_state.inicio_real = None
+if 'pausas' not in st.session_state:
+    st.session_state.pausas = datetime.timedelta(0)
+if 'historial' not in st.session_state:
+    st.session_state.historial = []
+
+# ==========================================
+# INTERFAZ VISUAL (Streamlit)
+# ==========================================
+st.title("🎬 Filmmaking Calendar")
+st.write(f"Bienvenido, **Jostin**")
+
+# 1. Cargar eventos si no hay
+if not st.session_state.tareas_hoy:
+    if st.button("Cargar Eventos de Hoy"):
+        with st.spinner("Conectando con Google Calendar..."):
+            hoy = datetime.date.today().isoformat()
+            events_result = st.session_state.service.events().list(
+                calendarId='primary', timeMin=f"{hoy}T00:00:00{TZ_SUFFIX}", timeMax=f"{hoy}T23:59:59{TZ_SUFFIX}",
+                singleEvents=True, orderBy='startTime').execute()
+            
+            for ev in events_result.get('items', []):
+                if 'dateTime' in ev['start']:
+                    nombre = ev.get('summary', 'Sin título')
+                    if not nombre.startswith("[APP]"):
+                        inicio = datetime.datetime.fromisoformat(ev['start']['dateTime'].replace('Z', '+00:00')).replace(tzinfo=None)
+                        st.session_state.tareas_hoy.append({"id": ev['id'], "nombre": nombre, "inicio": inicio})
+        st.rerun()
+
+# 2. Panel de control
+st.divider()
+
+if st.session_state.tarea_actual:
+    # MODO TRABAJO ACTIVO
+    tarea = st.session_state.tarea_actual
+    st.success(f"Trabajando en: **{tarea['nombre']}**")
+    
+    # Calcular tiempo en vivo
+    ahora = datetime.datetime.now()
+    tiempo_transcurrido = (ahora - st.session_state.inicio_real) - st.session_state.pausas
+    
+    st.metric(label="Tiempo Efectivo", value=str(tiempo_transcurrido).split('.')[0])
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("⏸️ Pausar (Almuerzo/Baño)", use_container_width=True):
+            # Lógica de pausa (guardar el tiempo actual)
+            st.session_state.inicio_pausa = datetime.datetime.now()
+            st.info("Tarea pausada. Ve a comer algo.")
+    
+    with col2:
+        if st.button("▶️ Reanudar", use_container_width=True):
+            if 'inicio_pausa' in st.session_state:
+                duracion_pausa = datetime.datetime.now() - st.session_state.inicio_pausa
+                st.session_state.pausas += duracion_pausa
+                del st.session_state.inicio_pausa
+                st.success("¡A trabajar de nuevo!")
+    
+    with col3:
+        if st.button("⏹️ Finalizar Tarea", type="primary", use_container_width=True):
+            # Aquí iría la lógica de guardar en Excel y Calendar
+            st.session_state.historial.append({
+                "nombre": tarea['nombre'], 
+                "tiempo": str(tiempo_transcurrido).split('.')[0]
+            })
+            st.session_state.tarea_actual = None
+            st.session_state.inicio_real = None
+            st.session_state.pausas = datetime.timedelta(0)
+            st.balloons()
+            st.success("¡Tarea guardada exitosamente!")
+            st.rerun()
+
+else:
+    # MODO SELECCIÓN DE TAREAS
+    st.subheader("Tus tareas pendientes:")
+    
+    if not st.session_state.tareas_hoy:
+        st.warning("No se han cargado eventos. Presiona 'Cargar Eventos de Hoy'.")
+    else:
+        for i, t in enumerate(st.session_state.tareas_hoy):
+            with st.container(border=True):
+                st.write(f"**{t['nombre']}**")
+                st.caption(f"Planeado para: {t['inicio'].strftime('%H:%M')}")
+                if st.button(f"▶️ Iniciar {t['nombre']}", key=f"btn_{i}"):
+                    st.session_state.tarea_actual = t
+                    st.session_state.inicio_real = datetime.datetime.now()
+                    st.session_state.pausas = datetime.timedelta(0)
+                    st.session_state.tareas_hoy.pop(i) # Quitarlo de pendientes
+                    st.rerun()
+
+# 3. Resumen del día
+if st.session_state.historial:
+    st.divider()
+    st.subheader("📊 Resumen de hoy")
+    for h in st.session_state.historial:
+        st.write(f"- {h['nombre']}: {h['tiempo']}")

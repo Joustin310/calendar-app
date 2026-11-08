@@ -17,58 +17,54 @@ SCOPES = ['https://www.googleapis.com/auth/calendar']
 TIMEZONE = "America/Costa_Rica"
 TZ_SUFFIX = "-06:00"
 
-# --- CONFIGURACIÓN FINANCIERA ---
 SUELDO_POR_HORA = 15.00 
 MONEDA = "$"
 
 ARCHIVO_REPORTE = 'reporte_tiempos.csv'
 
 # ==========================================
-# LÓGICA DE AUTENTICACIÓN CON SECRETS Y WEB FLOW
+# LÓGICA DE AUTENTICACIÓN (Adaptada para Cliente Web)
 # ==========================================
 @st.cache_resource
 def get_calendar_service():
     creds = None
     
-    # 1. Intentar cargar credenciales desde los Secrets (Token guardado previamente)
+    # 1. Si ya tenemos el token guardado en secrets (usuario ya autorizó)
     if "google_token" in st.secrets:
         creds = Credentials.from_authorized_user_info(st.secrets["google_token"], SCOPES)
-        
-    # 2. Intentar desde archivo local
-    elif os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-        
-    # 3. Si no hay credenciales válidas, iniciar flujo de autorización
+    
+    # 2. Si no, usamos el flujo web
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
             if "google_credentials" in st.secrets:
-                # --- FLUJO WEB PARA LA NUBE ---
                 creds_info = st.secrets["google_credentials"]
+                
+                # IMPORTANTE: Forzamos el tipo a 'web' en el diccionario para evitar errores
+                if "installed" in creds_info:
+                    creds_info["web"] = creds_info.pop("installed")
+                
                 flow = InstalledAppFlow.from_client_config(creds_info, SCOPES)
                 
-                # IMPORTANTE: Esta URL debe coincidir con la que pusiste en Google Cloud
+                # URL de redireccionamiento EXACTA
                 REDIRECT_URI = "https://filmmaking-calendar-app.streamlit.app/" 
                 flow.redirect_uri = REDIRECT_URI
                 
-                # Generar la URL de autorización
                 auth_url, _ = flow.authorization_url(prompt='consent')
                 
                 st.warning("⚠️ Necesitas autorizar el acceso a tu Google Calendar para continuar.")
                 st.markdown(f"👉 **[Haz clic aquí para autorizar con Google]({auth_url})**")
                 st.info("Después de autorizar, serás redirigido a la app. Copia el código de la URL (la parte después de '?code=') y pégalo abajo.")
                 
-                # Caja de texto para que el usuario pegue el código
                 code = st.text_input("Pega el código de autorización aquí:")
                 
                 if st.button("Conectar cuenta de Google") and code:
                     try:
-                        # Intercambiar el código por el token real
                         flow.fetch_token(code=code)
                         creds = flow.credentials
                         
-                        # Guardar el token para futuras sesiones (idealmente en Secrets, pero aquí lo guardamos local)
+                        # Guardamos el token
                         with open('token.json', 'w') as token:
                             token.write(creds.to_json())
                             
@@ -79,32 +75,32 @@ def get_calendar_service():
                         st.error(f"Error al autenticar: {e}")
                         return None
             else:
-                # --- FLUJO LOCAL (Tu computadora) ---
+                # Flujo local
                 flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
                 creds = flow.run_local_server(port=0)
                 
-                with open('token.json', 'w') as token:
-                    token.write(creds.to_json())
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
             
     if not creds:
         return None
         
     return build('calendar', 'v3', credentials=creds)
 
-# Inicializar el servicio (se detiene si falla la autenticación)
+# Inicializar servicio
 if 'service' not in st.session_state:
     try:
         service = get_calendar_service()
         if service:
             st.session_state.service = service
         else:
-            st.stop() # Detener la app si no se pudo autenticar
+            st.stop()
     except Exception as e:
         st.error(f"Error de inicialización: {e}")
         st.stop()
 
 # ==========================================
-# ESTADO DE LA SESIÓN (Memoria)
+# ESTADO DE LA SESIÓN
 # ==========================================
 if 'tareas_hoy' not in st.session_state:
     st.session_state.tareas_hoy = []
@@ -143,7 +139,6 @@ def guardar_en_excel(nombre_tarea, duracion, pausas):
 st.title("🎬 Filmmaking Calendar")
 st.write("Bienvenido, **Jostin**")
 
-# 1. Botón para cargar eventos
 if not st.session_state.tareas_hoy and not st.session_state.tarea_actual:
     if st.button("📅 Cargar Eventos de Hoy", use_container_width=True, type="primary"):
         with st.spinner("Conectando con Google Calendar..."):
@@ -167,7 +162,6 @@ if not st.session_state.tareas_hoy and not st.session_state.tarea_actual:
 
 st.divider()
 
-# 2. Panel de Control
 if st.session_state.tarea_actual:
     tarea = st.session_state.tarea_actual
     st.info(f"Trabajando en: **{tarea['nombre']}**")
@@ -217,7 +211,6 @@ if st.session_state.tarea_actual:
             st.rerun()
 
 else:
-    # Modo Selección de Tareas
     st.subheader("Tus tareas pendientes:")
     
     if not st.session_state.tareas_hoy:
@@ -234,7 +227,6 @@ else:
                     st.session_state.tareas_hoy.pop(i)
                     st.rerun()
 
-# 3. Resumen del día
 if st.session_state.historial:
     st.divider()
     st.subheader("📊 Resumen de hoy")

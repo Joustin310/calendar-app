@@ -23,13 +23,11 @@ MONEDA = "$"
 ARCHIVO_REPORTE = 'reporte_tiempos.csv'
 
 # ==========================================
-# LÓGICA DE AUTENTICACIÓN (Con corrección de JSON)
+# LÓGICA DE AUTENTICACIÓN (Sin cache para evitar warnings)
 # ==========================================
-@st.cache_resource
 def get_calendar_service():
     creds = None
     
-    # 1. Cargar token si ya existe en Secrets
     if "google_token" in st.secrets:
         creds = Credentials.from_authorized_user_info(st.secrets["google_token"], SCOPES)
     
@@ -40,13 +38,11 @@ def get_calendar_service():
             if "google_credentials" in st.secrets:
                 creds_info_raw = st.secrets["google_credentials"]
                 
-                # --- CORRECCIÓN AQUÍ: Convertir string a diccionario si es necesario ---
                 if isinstance(creds_info_raw, str):
                     creds_info = json.loads(creds_info_raw)
                 else:
                     creds_info = creds_info_raw
                 
-                # Adaptar de "installed" a "web" si es necesario
                 if "installed" in creds_info:
                     creds_info["web"] = creds_info.pop("installed")
                 
@@ -76,7 +72,6 @@ def get_calendar_service():
                         st.error(f"Error al autenticar: {e}")
                         return None
             else:
-                # Flujo local (si estás en tu computadora)
                 flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
                 creds = flow.run_local_server(port=0)
                 

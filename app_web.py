@@ -11,7 +11,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 # --- CONFIGURACIÓN BÁSICA ---
-st.set_page_config(page_title="Filmmaking Calendar", page_icon="🎬", layout="centered")
+st.set_page_config(page_title="Tezeline Studios", page_icon="🎬", layout="centered")
 
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 TIMEZONE = "America/Costa_Rica"
@@ -22,16 +22,29 @@ MONEDA = "$"
 
 ARCHIVO_REPORTE = 'reporte_tiempos.csv'
 
+# Diccionario para traducir los IDs de color de Google a nombres/emojis
+COLORES_GOOGLE = {
+    "1": "🔵 Azul (Defecto)",
+    "2": "🟢 Verde",
+    "3": "🟣 Morado",
+    "4": "🔴 Rojo",
+    "5": "🟡 Amarillo",
+    "6": "🟠 Naranja",
+    "7": "🩵 Cian",
+    "8": "⚪ Gris",
+    "9": "🔷 Azul oscuro",
+    "10": "🟩 Verde oscuro",
+    "11": "🟥 Rojo oscuro"
+}
+
 # ==========================================
-# LÓGICA DE AUTENTICACIÓN (Con corrección de JSON)
+# LÓGICA DE AUTENTICACIÓN
 # ==========================================
 def get_calendar_service():
     creds = None
     
-    # 1. Cargar token si ya existe en Secrets
     if "google_token" in st.secrets:
         token_raw = st.secrets["google_token"]
-        # Convertir de texto a diccionario si es necesario
         if isinstance(token_raw, str):
             token_raw = json.loads(token_raw)
         creds = Credentials.from_authorized_user_info(token_raw, SCOPES)
@@ -48,12 +61,10 @@ def get_calendar_service():
                 else:
                     creds_info = creds_info_raw
                 
-                # Adaptar de "installed" a "web"
                 if "installed" in creds_info:
                     creds_info["web"] = creds_info.pop("installed")
                 
                 flow = InstalledAppFlow.from_client_config(creds_info, SCOPES)
-                
                 REDIRECT_URI = "https://filmmaking-calendar-app.streamlit.app/" 
                 flow.redirect_uri = REDIRECT_URI
                 
@@ -61,7 +72,6 @@ def get_calendar_service():
                 
                 st.warning("⚠️ Necesitas autorizar el acceso a tu Google Calendar para continuar.")
                 st.markdown(f"👉 **[Haz clic aquí para autorizar con Google]({auth_url})**")
-                st.info("Después de autorizar, serás redirigido a la app. Copia el código de la URL y pégalo abajo.")
                 
                 code = st.text_input("Pega el código de autorización aquí:")
                 
@@ -78,7 +88,6 @@ def get_calendar_service():
                         st.error(f"Error al autenticar: {e}")
                         return None
             else:
-                # Flujo local (si estás en tu computadora)
                 flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
                 creds = flow.run_local_server(port=0)
                 
@@ -136,11 +145,22 @@ def guardar_en_excel(nombre_tarea, duracion, pausas):
             writer.writerow(["Fecha", "Hora", "Tarea", "Empleado", "Tiempo Efectivo", "Tiempo en Pausa", "Costo"])
         writer.writerow([fecha_str, hora_str, nombre_tarea, "Jostin", t_efectivo, t_pausa, f"{MONEDA}{costo:.2f}"])
 
+def iniciar_tarea(t):
+    st.session_state.tarea_actual = t
+    st.session_state.inicio_real = datetime.datetime.now()
+    st.session_state.pausas = datetime.timedelta(0)
+    # Quitarlo de la lista de pendientes
+    for i, tarea in enumerate(st.session_state.tareas_hoy):
+        if tarea['id'] == t['id']:
+            st.session_state.tareas_hoy.pop(i)
+            break
+    st.rerun()
+
 # ==========================================
 # INTERFAZ VISUAL
 # ==========================================
-st.title("🎬 Filmmaking Calendar")
-st.write("Bienvenido, **Jostin**")
+st.title("🎬 Tezeline Studios")
+st.write("Bienvenidos a **Tezeline Studios**")
 
 if not st.session_state.tareas_hoy and not st.session_state.tarea_actual:
     if st.button("📅 Cargar Eventos de Hoy", use_container_width=True, type="primary"):
@@ -156,7 +176,15 @@ if not st.session_state.tareas_hoy and not st.session_state.tarea_actual:
                         nombre = ev.get('summary', 'Sin título')
                         if not nombre.startswith("[APP]"):
                             inicio = datetime.datetime.fromisoformat(ev['start']['dateTime'].replace('Z', '+00:00')).replace(tzinfo=None)
-                            st.session_state.tareas_hoy.append({"id": ev['id'], "nombre": nombre, "inicio": inicio})
+                            # Capturamos el color (categoría) del evento
+                            color_id = ev.get('colorId', '1') 
+                            
+                            st.session_state.tareas_hoy.append({
+                                "id": ev['id'], 
+                                "nombre": nombre, 
+                                "inicio": inicio,
+                                "color": color_id
+                            })
                 st.success(f"Se cargaron {len(st.session_state.tareas_hoy)} tareas.")
                 time.sleep(1)
                 st.rerun()
@@ -165,9 +193,14 @@ if not st.session_state.tareas_hoy and not st.session_state.tarea_actual:
 
 st.divider()
 
+# ==========================================
+# SI HAY UNA TAREA EN CURSO
+# ==========================================
 if st.session_state.tarea_actual:
     tarea = st.session_state.tarea_actual
-    st.info(f"Trabajando en: **{tarea['nombre']}**")
+    color_emoji = COLORES_GOOGLE.get(tarea.get('color', '1'), "⚪").split(" ")[0]
+    
+    st.info(f"Trabajando en: {color_emoji} **{tarea['nombre']}**")
     
     ahora = datetime.datetime.now()
     tiempo_transcurrido = (ahora - st.session_state.inicio_real) - st.session_state.pausas
@@ -200,7 +233,8 @@ if st.session_state.tarea_actual:
             st.session_state.historial.append({
                 "nombre": tarea['nombre'], 
                 "tiempo": str(tiempo_transcurrido).split('.')[0],
-                "pausas": str(st.session_state.pausas).split('.')[0]
+                "pausas": str(st.session_state.pausas).split('.')[0],
+                "color": tarea.get('color', '1')
             })
             
             st.session_state.tarea_actual = None
@@ -213,25 +247,54 @@ if st.session_state.tarea_actual:
             time.sleep(1)
             st.rerun()
 
+# ==========================================
+# SI NO HAY TAREA EN CURSO (MODO SELECCIÓN)
+# ==========================================
 else:
-    st.subheader("Tus tareas pendientes:")
-    
-    if not st.session_state.tareas_hoy:
-        st.warning("No hay tareas cargadas. Presiona 'Cargar Eventos de Hoy'.")
-    else:
-        for i, t in enumerate(st.session_state.tareas_hoy):
+    if st.session_state.tareas_hoy:
+        # --- LÓGICA DE SIGUIENTE EVENTO ---
+        ahora = datetime.datetime.now()
+        # Buscamos el evento cuya hora de inicio sea mayor o igual a la hora actual
+        proximos_eventos = [t for t in st.session_state.tareas_hoy if t['inicio'] >= ahora]
+        
+        if proximos_eventos:
+            # Como la lista ya viene ordenada por hora, el primero es el más próximo
+            siguiente_evento = proximos_eventos[0]
+            color_emoji = COLORES_GOOGLE.get(siguiente_evento.get('color', '1'), "⚪").split(" ")[0]
+            
+            st.subheader("🔔 Siguiente evento planeado:")
             with st.container(border=True):
-                st.write(f"**{t['nombre']}**")
+                st.markdown(f"### {color_emoji} {siguiente_evento['nombre']}")
+                st.write(f"⏰ Programado para las: **{siguiente_evento['inicio'].strftime('%H:%M')}**")
+                
+                # Botón grande para iniciar el siguiente
+                if st.button(f"▶️ Iniciar Ahora", type="primary", use_container_width=True):
+                    iniciar_tarea(siguiente_evento)
+        else:
+            st.info("🎉 No hay más eventos próximos para hoy.")
+
+        st.divider()
+
+        # --- LISTA COMPLETA DE TAREAS ---
+        st.subheader("📋 Todas tus tareas de hoy:")
+        
+        for i, t in enumerate(st.session_state.tareas_hoy):
+            color_emoji = COLORES_GOOGLE.get(t.get('color', '1'), "⚪").split(" ")[0]
+            with st.container(border=True):
+                # Mostramos el emoji de color, el nombre y la hora
+                st.markdown(f"**{color_emoji} {t['nombre']}**")
                 st.caption(f"Planeado para: {t['inicio'].strftime('%H:%M')}")
                 if st.button(f"▶️ Iniciar", key=f"btn_{i}", use_container_width=True):
-                    st.session_state.tarea_actual = t
-                    st.session_state.inicio_real = datetime.datetime.now()
-                    st.session_state.pausas = datetime.timedelta(0)
-                    st.session_state.tareas_hoy.pop(i)
-                    st.rerun()
+                    iniciar_tarea(t)
+    else:
+        st.warning("No hay tareas cargadas. Presiona 'Cargar Eventos de Hoy'.")
 
+# ==========================================
+# RESUMEN DEL DÍA
+# ==========================================
 if st.session_state.historial:
     st.divider()
     st.subheader("📊 Resumen de hoy")
     for h in st.session_state.historial:
-        st.write(f"- **{h['nombre']}**: {h['tiempo']} trabajados | {h['pausas']} en pausa")
+        color_emoji = COLORES_GOOGLE.get(h.get('color', '1'), "⚪").split(" ")[0]
+        st.write(f"- {color_emoji} **{h['nombre']}**: {h['tiempo']} trabajados | {h['pausas']} en pausa")

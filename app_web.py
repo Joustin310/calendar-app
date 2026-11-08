@@ -23,31 +23,35 @@ MONEDA = "$"
 ARCHIVO_REPORTE = 'reporte_tiempos.csv'
 
 # ==========================================
-# LÓGICA DE AUTENTICACIÓN (Adaptada para Cliente Web)
+# LÓGICA DE AUTENTICACIÓN (Con corrección de JSON)
 # ==========================================
 @st.cache_resource
 def get_calendar_service():
     creds = None
     
-    # 1. Si ya tenemos el token guardado en secrets (usuario ya autorizó)
+    # 1. Cargar token si ya existe en Secrets
     if "google_token" in st.secrets:
         creds = Credentials.from_authorized_user_info(st.secrets["google_token"], SCOPES)
     
-    # 2. Si no, usamos el flujo web
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
             if "google_credentials" in st.secrets:
-                creds_info = st.secrets["google_credentials"]
+                creds_info_raw = st.secrets["google_credentials"]
                 
-                # IMPORTANTE: Forzamos el tipo a 'web' en el diccionario para evitar errores
+                # --- CORRECCIÓN AQUÍ: Convertir string a diccionario si es necesario ---
+                if isinstance(creds_info_raw, str):
+                    creds_info = json.loads(creds_info_raw)
+                else:
+                    creds_info = creds_info_raw
+                
+                # Adaptar de "installed" a "web" si es necesario
                 if "installed" in creds_info:
                     creds_info["web"] = creds_info.pop("installed")
                 
                 flow = InstalledAppFlow.from_client_config(creds_info, SCOPES)
                 
-                # URL de redireccionamiento EXACTA
                 REDIRECT_URI = "https://filmmaking-calendar-app.streamlit.app/" 
                 flow.redirect_uri = REDIRECT_URI
                 
@@ -55,7 +59,7 @@ def get_calendar_service():
                 
                 st.warning("⚠️ Necesitas autorizar el acceso a tu Google Calendar para continuar.")
                 st.markdown(f"👉 **[Haz clic aquí para autorizar con Google]({auth_url})**")
-                st.info("Después de autorizar, serás redirigido a la app. Copia el código de la URL (la parte después de '?code=') y pégalo abajo.")
+                st.info("Después de autorizar, serás redirigido a la app. Copia el código de la URL y pégalo abajo.")
                 
                 code = st.text_input("Pega el código de autorización aquí:")
                 
@@ -63,11 +67,8 @@ def get_calendar_service():
                     try:
                         flow.fetch_token(code=code)
                         creds = flow.credentials
-                        
-                        # Guardamos el token
                         with open('token.json', 'w') as token:
                             token.write(creds.to_json())
-                            
                         st.success("¡Autenticación exitosa! Recargando...")
                         time.sleep(2)
                         st.rerun()
@@ -75,7 +76,7 @@ def get_calendar_service():
                         st.error(f"Error al autenticar: {e}")
                         return None
             else:
-                # Flujo local
+                # Flujo local (si estás en tu computadora)
                 flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
                 creds = flow.run_local_server(port=0)
                 

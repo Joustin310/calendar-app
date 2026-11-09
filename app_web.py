@@ -26,7 +26,7 @@ SUELDO_POR_HORA = 15.00
 MONEDA = "$"
 
 ARCHIVO_REPORTE = 'reporte_tiempos.csv'
-ARCHIVO_ESTADO = 'estado_actual.json' # Archivo para no perder el progreso
+ARCHIVO_ESTADO = 'estado_actual.json' 
 
 # ==========================================
 # CONFIGURACIÓN DE CALENDARIOS
@@ -118,9 +118,16 @@ if 'service' not in st.session_state:
 # GESTIÓN DE ESTADO PERSISTENTE
 # ==========================================
 def guardar_estado():
-    """Guarda la tarea actual en un archivo JSON para que no se pierda al recargar."""
+    """Guarda la tarea actual en un archivo JSON convirtiendo las fechas a texto."""
+    tarea_serializable = None
+    if st.session_state.tarea_actual:
+        # Convertimos la fecha de inicio a texto para que JSON lo pueda leer
+        tarea_serializable = st.session_state.tarea_actual.copy()
+        if 'inicio' in tarea_serializable:
+            tarea_serializable['inicio'] = tarea_serializable['inicio'].isoformat()
+
     estado = {
-        "tarea_actual": st.session_state.tarea_actual,
+        "tarea_actual": tarea_serializable,
         "inicio_real": st.session_state.inicio_real.isoformat() if st.session_state.inicio_real else None,
         "pausas_segundos": st.session_state.pausas.total_seconds(),
         "inicio_pausa": st.session_state.inicio_pausa.isoformat() if st.session_state.inicio_pausa else None
@@ -135,21 +142,24 @@ def cargar_estado():
             try:
                 estado = json.load(f)
                 if estado.get('tarea_actual'):
-                    st.session_state.tarea_actual = estado['tarea_actual']
+                    tarea = estado['tarea_actual']
+                    # Convertimos el texto de vuelta a objeto datetime
+                    if 'inicio' in tarea:
+                        tarea['inicio'] = datetime.datetime.fromisoformat(tarea['inicio'])
+                    
+                    st.session_state.tarea_actual = tarea
                     st.session_state.inicio_real = datetime.datetime.fromisoformat(estado['inicio_real']) if estado['inicio_real'] else None
                     st.session_state.pausas = datetime.timedelta(seconds=estado['pausas_segundos'])
                     st.session_state.inicio_pausa = datetime.datetime.fromisoformat(estado['inicio_pausa']) if estado['inicio_pausa'] else None
                     return True
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Error al cargar estado: {e}")
     return False
 
 def limpiar_estado():
-    """Limpia el estado cuando se termina una tarea."""
     if os.path.exists(ARCHIVO_ESTADO):
         os.remove(ARCHIVO_ESTADO)
 
-# Inicializar variables en session_state
 if 'tareas_hoy' not in st.session_state:
     st.session_state.tareas_hoy = []
 if 'tarea_actual' not in st.session_state:
@@ -163,7 +173,6 @@ if 'inicio_pausa' not in st.session_state:
 if 'historial' not in st.session_state:
     st.session_state.historial = []
 
-# Al arrancar la app por primera vez, intentamos cargar el estado anterior
 if 'estado_cargado' not in st.session_state:
     cargar_estado()
     st.session_state.estado_cargado = True
@@ -246,7 +255,6 @@ if st.session_state.tarea_actual:
     
     ahora = datetime.datetime.now()
     
-    # Lógica de tiempo
     if st.session_state.inicio_pausa:
         tiempo_transcurrido = (st.session_state.inicio_pausa - st.session_state.inicio_real) - st.session_state.pausas
         st.warning("⏸️ Tarea en PAUSA. Tómate tu tiempo.")
@@ -255,7 +263,6 @@ if st.session_state.tarea_actual:
     
     st.metric(label="⏱️ Tiempo Efectivo", value=str(tiempo_transcurrido).split('.')[0])
     
-    # Sección para ajustar/borrar tiempo (por si se olvidaron marcar)
     with st.expander("🛠️ Ajustar tiempo manualmente (Error de registro)"):
         st.write("Si te olvidaste de marcar el inicio, puedes ajustar el reloj aquí.")
         mins_ajuste = st.number_input("Minutos a sumar/restar (usa negativos para restar):", value=0, step=1)
@@ -291,12 +298,11 @@ if st.session_state.tarea_actual:
             guardar_en_excel(tarea['nombre'], tiempo_transcurrido, st.session_state.pausas)
             st.session_state.historial.append({"nombre": tarea['nombre'], "tiempo": str(tiempo_transcurrido).split('.')[0]})
             
-            # Limpiar todo
             st.session_state.tarea_actual = None
             st.session_state.inicio_real = None
             st.session_state.pausas = datetime.timedelta(0)
             st.session_state.inicio_pausa = None
-            limpiar_estado() # Borramos el archivo de guardado
+            limpiar_estado()
             
             st.balloons()
             st.success("¡Tarea guardada exitosamente!")
@@ -306,8 +312,6 @@ if st.session_state.tarea_actual:
 else:
     if st.session_state.tareas_hoy:
         ahora = datetime.datetime.now()
-        
-        # --- LÓGICA DEL SIGUIENTE EVENTO Y ATRASADOS ---
         proximos_eventos = [t for t in st.session_state.tareas_hoy if t['inicio'] >= ahora]
         
         if proximos_eventos:
@@ -329,8 +333,6 @@ else:
         
         for i, t in enumerate(st.session_state.tareas_hoy):
             color_emoji = COLORES_GOOGLE.get(t.get('color', '1'), "⚪")
-            
-            # Comprobar si está atrasado (si su hora de inicio ya pasó)
             esta_atrasado = ahora > t['inicio']
             
             with st.container(border=True):
@@ -341,7 +343,6 @@ else:
                     
                 st.caption(f"Planeado para: {t['inicio'].strftime('%H:%M')}")
                 
-                # Botón de iniciar
                 if st.button(f"▶️ Iniciar", key=f"btn_{i}", use_container_width=True):
                     iniciar_tarea(t)
     else:

@@ -17,36 +17,24 @@ SCOPES = ['https://www.googleapis.com/auth/calendar']
 TIMEZONE = "America/Costa_Rica"
 TZ_SUFFIX = "-06:00"
 
-# --- CONFIGURACIÓN FINANCIERA ---
 SUELDO_POR_HORA = 15.00 
 MONEDA = "$"
 
 ARCHIVO_REPORTE = 'reporte_tiempos.csv'
 
 # ==========================================
-# CONFIGURACIÓN DE CALENDARIOS
+# CONFIGURACIÓN DE CALENDARIOS (PON TUS IDS AQUÍ)
 # ==========================================
-# Pega aquí los IDs que copiaste de la configuración de Google Calendar
 CALENDARIO_PRINCIPAL = 'primary'
-CALENDARIO_CREATIVO = '7ec5c5ed4ea023b1fdb672dfd360b9065e696d873e737f289b594aebebfc6915@group.calendar.google.com'
-CALENDARIO_COMERCIO = '98669128df62f69a9b30417192dd2fc78f480913a55f7a5f01d9725daf0a528e@group.calendar.google.com'
+CALENDARIO_CREATIVO = 'PEGA_AQUI_TU_ID_CREATIVO@group.calendar.google.com'
+CALENDARIO_COMERCIO = 'PEGA_AQUI_TU_ID_COMERCIO@group.calendar.google.com'
 
-# Lista con todos los calendarios que la app va a revisar
 CALENDARIOS_A_LEER = [CALENDARIO_PRINCIPAL, CALENDARIO_CREATIVO, CALENDARIO_COMERCIO]
 
-# Diccionario para traducir los IDs de color de Google a nombres/emojis
 COLORES_GOOGLE = {
-    "1": "🔵 Azul (Defecto)",
-    "2": "🟢 Verde",
-    "3": "🟣 Morado",
-    "4": "🔴 Rojo",
-    "5": "🟡 Amarillo",
-    "6": "🟠 Naranja",
-    "7": "🩵 Cian",
-    "8": "⚪ Gris",
-    "9": "🔷 Azul oscuro",
-    "10": "🟩 Verde oscuro",
-    "11": "🟥 Rojo oscuro"
+    "1": "🔵 Azul", "2": "🟢 Verde", "3": "🟣 Morado", "4": "🔴 Rojo",
+    "5": "🟡 Amarillo", "6": "🟠 Naranja", "7": "🩵 Cian", "8": "⚪ Gris",
+    "9": "🔷 Azul oscuro", "10": "🟩 Verde oscuro", "11": "🟥 Rojo oscuro"
 }
 
 # ==========================================
@@ -111,7 +99,6 @@ def get_calendar_service():
         
     return build('calendar', 'v3', credentials=creds)
 
-# Inicializar servicio
 if 'service' not in st.session_state:
     try:
         service = get_calendar_service()
@@ -147,7 +134,6 @@ def guardar_en_excel(nombre_tarea, duracion, pausas):
     hora_str = datetime.datetime.now().strftime('%H:%M:%S')
     t_efectivo = str(duracion).split('.')[0]
     t_pausa = str(pausas).split('.')[0]
-    
     costo = (duracion.total_seconds() / 3600) * SUELDO_POR_HORA
     
     file_exists = os.path.isfile(ARCHIVO_REPORTE)
@@ -179,50 +165,59 @@ if not st.session_state.tareas_hoy and not st.session_state.tarea_actual:
             try:
                 hoy = datetime.date.today().isoformat()
                 todos_los_eventos = []
+                errores = []
                 
-                # Iteramos sobre cada uno de los 3 calendarios
+                # Iteramos sobre cada calendario
                 for cal_id in CALENDARIOS_A_LEER:
-                    # Si no has puesto el ID real, lo saltamos para que no falle
                     if "PEGA_AQUI" in cal_id:
-                        continue
+                        continue # Saltamos si no lo has configurado
                         
-                    events_result = st.session_state.service.events().list(
-                        calendarId=cal_id, 
-                        timeMin=f"{hoy}T00:00:00{TZ_SUFFIX}", 
-                        timeMax=f"{hoy}T23:59:59{TZ_SUFFIX}",
-                        singleEvents=True, 
-                        orderBy='startTime'
-                    ).execute()
-                    
-                    for ev in events_result.get('items', []):
-                        if 'dateTime' in ev['start']:
-                            nombre = ev.get('summary', 'Sin título')
-                            if not nombre.startswith("[APP]"):
-                                inicio = datetime.datetime.fromisoformat(ev['start']['dateTime'].replace('Z', '+00:00')).replace(tzinfo=None)
-                                color_id = ev.get('colorId', '1') 
-                                
-                                todos_los_eventos.append({
-                                    "id": ev['id'], 
-                                    "nombre": nombre, 
-                                    "inicio": inicio,
-                                    "color": color_id
-                                })
+                    try:
+                        events_result = st.session_state.service.events().list(
+                            calendarId=cal_id, 
+                            timeMin=f"{hoy}T00:00:00{TZ_SUFFIX}", 
+                            timeMax=f"{hoy}T23:59:59{TZ_SUFFIX}",
+                            singleEvents=True, 
+                            orderBy='startTime'
+                        ).execute()
+                        
+                        eventos_encontrados = events_result.get('items', [])
+                        
+                        for ev in eventos_encontrados:
+                            if 'dateTime' in ev['start']:
+                                nombre = ev.get('summary', 'Sin título')
+                                if not nombre.startswith("[APP]"):
+                                    inicio = datetime.datetime.fromisoformat(ev['start']['dateTime'].replace('Z', '+00:00')).replace(tzinfo=None)
+                                    color_id = ev.get('colorId', '1') 
+                                    
+                                    todos_los_eventos.append({
+                                        "id": ev['id'], 
+                                        "nombre": nombre, 
+                                        "inicio": inicio,
+                                        "color": color_id,
+                                        "calendario": cal_id # Guardamos de dónde viene
+                                    })
+                    except Exception as e:
+                        errores.append(f"Error en calendario {cal_id}: {e}")
                 
-                # Ordenamos TODOS los eventos (de los 3 calendarios) por hora
+                if errores:
+                    for err in errores:
+                        st.warning(err)
+
                 todos_los_eventos.sort(key=lambda x: x['inicio'])
                 st.session_state.tareas_hoy = todos_los_eventos
                 
-                st.success(f"Se cargaron {len(st.session_state.tareas_hoy)} tareas de todos los calendarios.")
+                st.success(f"Se cargaron {len(st.session_state.tareas_hoy)} tareas.")
                 time.sleep(1)
                 st.rerun()
             except Exception as e:
-                st.error(f"Error al cargar eventos: {e}")
+                st.error(f"Error general: {e}")
 
 st.divider()
 
 if st.session_state.tarea_actual:
     tarea = st.session_state.tarea_actual
-    color_emoji = COLORES_GOOGLE.get(tarea.get('color', '1'), "⚪").split(" ")[0]
+    color_emoji = COLORES_GOOGLE.get(tarea.get('color', '1'), "⚪")
     
     st.info(f"Trabajando en: {color_emoji} **{tarea['nombre']}**")
     
@@ -278,7 +273,7 @@ else:
         
         if proximos_eventos:
             siguiente_evento = proximos_eventos[0]
-            color_emoji = COLORES_GOOGLE.get(siguiente_evento.get('color', '1'), "⚪").split(" ")[0]
+            color_emoji = COLORES_GOOGLE.get(siguiente_evento.get('color', '1'), "⚪")
             
             st.subheader("🔔 Siguiente evento planeado:")
             with st.container(border=True):
@@ -295,7 +290,7 @@ else:
         st.subheader("📋 Todas tus tareas de hoy:")
         
         for i, t in enumerate(st.session_state.tareas_hoy):
-            color_emoji = COLORES_GOOGLE.get(t.get('color', '1'), "⚪").split(" ")[0]
+            color_emoji = COLORES_GOOGLE.get(t.get('color', '1'), "⚪")
             with st.container(border=True):
                 st.markdown(f"**{color_emoji} {t['nombre']}**")
                 st.caption(f"Planeado para: {t['inicio'].strftime('%H:%M')}")
@@ -308,5 +303,5 @@ if st.session_state.historial:
     st.divider()
     st.subheader("📊 Resumen de hoy")
     for h in st.session_state.historial:
-        color_emoji = COLORES_GOOGLE.get(h.get('color', '1'), "⚪").split(" ")[0]
+        color_emoji = COLORES_GOOGLE.get(h.get('color', '1'), "⚪")
         st.write(f"- {color_emoji} **{h['nombre']}**: {h['tiempo']} trabajados | {h['pausas']} en pausa")

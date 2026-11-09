@@ -26,15 +26,16 @@ ARCHIVO_REPORTE = 'reporte_tiempos.csv'
 # CONFIGURACIÓN DE CALENDARIOS (PON TUS IDS AQUÍ)
 # ==========================================
 CALENDARIO_PRINCIPAL = 'primary'
-CALENDARIO_CREATIVO = '7ec5c5ed4ea023b1fdb672dfd360b9065e696d873e737f289b594aebebfc6915@group.calendar.google.com'
-CALENDARIO_COMERCIO = '98669128df62f69a9b30417192dd2fc78f480913a55f7a5f01d9725daf0a528e@group.calendar.google.com'
+CALENDARIO_CREATIVO = 'PEGA_AQUI_TU_ID_CREATIVO@group.calendar.google.com'
+CALENDARIO_COMERCIO = 'PEGA_AQUI_TU_ID_COMERCIO@group.calendar.google.com'
 
 CALENDARIOS_A_LEER = [CALENDARIO_PRINCIPAL, CALENDARIO_CREATIVO, CALENDARIO_COMERCIO]
 
+# Ahora el diccionario solo guarda el emoji de color, no el texto
 COLORES_GOOGLE = {
-    "1": "🔵 Azul", "2": "🟢 Verde", "3": "🟣 Morado", "4": "🔴 Rojo",
-    "5": "🟡 Amarillo", "6": "🟠 Naranja", "7": "🩵 Cian", "8": "⚪ Gris",
-    "9": "🔷 Azul oscuro", "10": "🟩 Verde oscuro", "11": "🟥 Rojo oscuro"
+    "1": "🔵", "2": "🟢", "3": "🟣", "4": "🔴",
+    "5": "🟡", "6": "🟠", "7": "🩵", "8": "⚪",
+    "9": "🔷", "10": "🟩", "11": "🟥"
 }
 
 # ==========================================
@@ -167,10 +168,9 @@ if not st.session_state.tareas_hoy and not st.session_state.tarea_actual:
                 todos_los_eventos = []
                 errores = []
                 
-                # Iteramos sobre cada calendario
                 for cal_id in CALENDARIOS_A_LEER:
                     if "PEGA_AQUI" in cal_id:
-                        continue # Saltamos si no lo has configurado
+                        continue
                         
                     try:
                         events_result = st.session_state.service.events().list(
@@ -181,9 +181,7 @@ if not st.session_state.tareas_hoy and not st.session_state.tarea_actual:
                             orderBy='startTime'
                         ).execute()
                         
-                        eventos_encontrados = events_result.get('items', [])
-                        
-                        for ev in eventos_encontrados:
+                        for ev in events_result.get('items', []):
                             if 'dateTime' in ev['start']:
                                 nombre = ev.get('summary', 'Sin título')
                                 if not nombre.startswith("[APP]"):
@@ -195,10 +193,10 @@ if not st.session_state.tareas_hoy and not st.session_state.tarea_actual:
                                         "nombre": nombre, 
                                         "inicio": inicio,
                                         "color": color_id,
-                                        "calendario": cal_id # Guardamos de dónde viene
+                                        "calendario": cal_id
                                     })
                     except Exception as e:
-                        errores.append(f"Error en calendario {cal_id}: {e}")
+                        errores.append(f"Error en calendario: {e}")
                 
                 if errores:
                     for err in errores:
@@ -277,6 +275,7 @@ else:
             
             st.subheader("🔔 Siguiente evento planeado:")
             with st.container(border=True):
+                # Quitamos el texto del color y solo dejamos el emoji
                 st.markdown(f"### {color_emoji} {siguiente_evento['nombre']}")
                 st.write(f"⏰ Programado para las: **{siguiente_evento['inicio'].strftime('%H:%M')}**")
                 
